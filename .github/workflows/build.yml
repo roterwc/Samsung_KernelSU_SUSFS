@@ -317,6 +317,71 @@ jobs:
             ./AnyKernel3/**
           compression-level: 9
       
+      # --- 아래 두 단계는 커널 업로드 이후라 커널 빌드/품질에 영향 없음 ---
+      # NoMount 메타모듈(공식 릴리스)을 받아 아티팩트로 함께 제공
+      - name: Fetch NoMount metamodule
+        if: inputs.nomount == 'true'
+        continue-on-error: true
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -o pipefail
+          mkdir -p nomount-metamodule
+          curl -fsSL -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/maxsteeel/nomount/releases/latest" > nm_rel.json
+          url=$(grep -o '"browser_download_url"[^,]*NoMount-[^"]*\.zip"' nm_rel.json \
+            | head -1 | sed -E 's/.*"(https[^"]*)"/\1/')
+          echo "NoMount metamodule URL: $url"
+          if [ -n "$url" ]; then
+            curl -fL -o "nomount-metamodule/$(basename "$url")" "$url"
+            ls -lh nomount-metamodule/
+          else
+            echo "NoMount release asset not found (skipping, kernel artifact unaffected)"
+          fi
+
+      - name: Upload NoMount metamodule
+        if: inputs.nomount == 'true'
+        continue-on-error: true
+        uses: actions/upload-artifact@v6
+        with:
+          name: NoMount-Metamodule
+          path: nomount-metamodule/**
+          if-no-files-found: warn
+          compression-level: 9
+
+      # KernelSU-Next 매니저 APK(spoofed 포함)를 받아 아티팩트로 함께 제공
+      - name: Fetch KernelSU-Next manager APKs
+        if: inputs.ksun == 'true'
+        continue-on-error: true
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -o pipefail
+          mkdir -p manager-apks
+          curl -fsSL -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/KernelSU-Next/KernelSU-Next/releases/latest" > ksun_rel.json
+          grep -o '"browser_download_url"[^,]*\.apk"' ksun_rel.json \
+            | sed -E 's/.*"(https[^"]*)"/\1/' | while read -r url; do
+              [ -n "$url" ] || continue
+              echo "Manager APK: $url"
+              curl -fL -o "manager-apks/$(basename "$url")" "$url" || true
+            done
+          ls -lh manager-apks/ || echo "no manager apks downloaded (kernel artifact unaffected)"
+
+      - name: Upload manager APKs
+        if: inputs.ksun == 'true'
+        continue-on-error: true
+        uses: actions/upload-artifact@v6
+        with:
+          name: manager-apks
+          path: manager-apks/**
+          if-no-files-found: warn
+          compression-level: 9
+
       - name: Scan and collect patch rejects
         if: ${{ always() }}
         run: |
