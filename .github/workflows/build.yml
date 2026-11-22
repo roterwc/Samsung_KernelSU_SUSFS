@@ -507,3 +507,49 @@ jobs:
           else
             echo "  No rejected patches found." >> build_summary.md
           fi
+
+      # --- 결과물을 GitHub 릴리즈로 영구 발행 (아티팩트 90일 만료 문제 해결) ---
+      # 커널 빌드가 끝난 뒤 실행 → 커널 품질/성능에는 영향 없음
+      - name: Publish GitHub Release
+        if: ${{ always() }}
+        continue-on-error: true
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -o pipefail
+          mkdir -p release-assets
+
+          # 1) 커널(AnyKernel3)을 플래시용 zip으로 압축
+          if [ -d AnyKernel3 ] && [ -n "$(ls -A AnyKernel3 2>/dev/null)" ]; then
+            ( cd AnyKernel3 && zip -r9 "../release-assets/${FILE_NAME}-AnyKernel3.zip" ./* -x ".git*" )
+          else
+            echo "AnyKernel3 folder empty/missing — kernel build likely failed; skipping release"
+          fi
+
+          # 2) NoMount 메타모듈 (nomount 켰을 때만 존재)
+          if [ -d nomount-metamodule ]; then
+            cp -v nomount-metamodule/*.zip release-assets/ 2>/dev/null || true
+          fi
+
+          # 3) 매니저 APK (일반 + spoofed, 개별 파일 그대로)
+          if [ -d manager-apks ]; then
+            cp -v manager-apks/*.apk release-assets/ 2>/dev/null || true
+          fi
+
+          echo "=== release assets ==="
+          ls -lh release-assets/ 2>/dev/null || true
+
+          # 커널 zip이 없으면 릴리즈 발행 안 함 (빈 릴리즈 방지)
+          if [ ! -f "release-assets/${FILE_NAME}-AnyKernel3.zip" ]; then
+            echo "No kernel zip — skipping release publish"
+            exit 0
+          fi
+
+          # 4) 릴리즈 발행 (고유 태그 = 빌드 실행번호 + 파일명)
+          TAG="build-${GITHUB_RUN_NUMBER}-${FILE_NAME}"
+          gh release create "$TAG" release-assets/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "${FILE_NAME}" \
+            --notes "Automated build — kernel + NoMount metamodule + manager APKs (latest). Artifacts in the Actions run expire in 90 days; this release is permanent." \
+          || echo "release publish failed (artifacts still available, kernel unaffected)"
